@@ -1,5 +1,14 @@
-pipecat-ai[daily,openai,sarvam]
+pipecat-ai[daily,openai,sarvam,webrtc]
 python-dotenv
 loguru
 asyncpg
 python-dateutil
+requests
+redis
+fastapi
+uvicorn
+twilio
+pytz
+pipecat-ai[google]
+python-multipart
+pipecat-ai-small-webrtc-prebuilt

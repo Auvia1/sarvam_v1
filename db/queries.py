@@ -1,6 +1,8 @@
+from loguru import logger
 async def get_clinic_id(pool):
     # Hardcoded for demo, but normally fetched via API key/tenant ID
     return await pool.fetchval("SELECT id FROM clinics WHERE name = 'Mithra Hospital' LIMIT 1")
+
 
 async def find_available_doctors(pool, clinic_id, specialty_keyword):
     """Fetch doctors matching the specialty along with their precise weekly schedule."""
@@ -20,16 +22,28 @@ async def find_available_doctors(pool, clinic_id, specialty_keyword):
           AND (ds.effective_to IS NULL OR ds.effective_to >= CURRENT_DATE)
     """
     async with pool.acquire() as conn:
-        return await conn.fetch(query, clinic_id, f"%{specialty_keyword}%")
-
+        records = await conn.fetch(query, clinic_id, f"%{specialty_keyword}%")
+        
+        # --- NEW LOGS ADDED HERE ---
+        logger.info(f"🏥 DB FETCH: Searched for '{specialty_keyword}'. Found {len(records)} schedule rows.")
+        for r in records:
+            logger.info(f"   -> Doc: {r['name']} | DayOfWeek(0=Sun, 6=Sat): {r['day_of_week']} | Hours: {r['start_time']} - {r['end_time']}")
+        # ---------------------------
+        
+        return records
 async def lookup_active_appointment(pool, phone):
+    """Fetches confirmed, or pending appointments strictly under 15 minutes old."""
     query = """
         SELECT a.id, p.name as patient_name, d.name as doctor_name, a.appointment_start
         FROM appointments a
         JOIN patients p ON a.patient_id = p.id
         JOIN doctors d ON a.doctor_id = d.id
-        WHERE p.phone = $1 AND a.status IN ('pending', 'confirmed')
-        ORDER BY a.appointment_start DESC LIMIT 1
+        WHERE p.phone = $1 
+          AND (
+              a.status = 'confirmed' 
+              OR (a.status = 'pending' AND a.created_at >= NOW() - INTERVAL '15 minutes')
+          )
+        ORDER BY a.created_at DESC LIMIT 1
     """
     return await pool.fetchrow(query, phone)
 
@@ -56,10 +70,10 @@ async def get_doctor_booked_slots(pool, doctor_id: str, date_obj):
 async def book_new_appointment(pool, clinic_id, doctor_id, patient_name, phone, start_time, end_time, force_book=False):
     """Handle 15-min cleanup, Patient creation/lookup, and Appointment booking with Safe UPSERT."""
     async with pool.acquire() as conn:
-        # 1. Clean up old unpaid appointments
+        # 1. Clean up old unpaid appointments by marking them as cancelled (Soft Delete)
         cleanup_query = """
-            UPDATE appointments 
-            SET status = 'cancelled' 
+            UPDATE appointments
+            SET status = 'cancelled', updated_at = NOW()
             WHERE status = 'pending' AND created_at < NOW() - INTERVAL '15 minutes'
         """
         await conn.execute(cleanup_query)
@@ -76,17 +90,24 @@ async def book_new_appointment(pool, clinic_id, doctor_id, patient_name, phone, 
         # 3. OVERALL PATIENT APPOINTMENT CHECK (Blocks booking unless force_book is True)
         if not force_book:
             check_existing = """
-                SELECT TO_CHAR(appointment_start AT TIME ZONE 'Asia/Kolkata', 'HH12:MI AM'), status 
-                FROM appointments 
-                WHERE patient_id = $1 
-                  AND appointment_start >= NOW() 
-                  AND status IN ('pending', 'confirmed')
+                SELECT 
+                    a.id, 
+                    TO_CHAR(a.appointment_start AT TIME ZONE 'Asia/Kolkata', 'HH12:MI AM') as time_str, 
+                    a.status,
+                    d.name as doctor_name,
+                    d.speciality as doctor_speciality
+                FROM appointments a
+                JOIN doctors d ON a.doctor_id = d.id
+                WHERE a.patient_id = $1 
+                  AND a.appointment_start >= NOW() 
+                  AND a.status IN ('pending', 'confirmed')
+                ORDER BY a.created_at DESC
                 LIMIT 1
             """
             existing = await conn.fetchrow(check_existing, patient_id)
             if existing:
-                # Returns a special string with the time and status
-                return f"HAS_OTHER_APPOINTMENT|{existing[0]}|{existing[1]}"
+                # Now returns the ID, Time, Status, Doc Name, and Doc Specialty!
+                return f"HAS_OTHER_APPOINTMENT|{existing['id']}|{existing['time_str']}|{existing['status']}|{existing['doctor_name']}|{existing['doctor_speciality']}"
 
         # 4. SAFEGUARD: Check if the specific slot is currently held by someone else
         check_query = """

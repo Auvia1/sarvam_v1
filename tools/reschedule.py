@@ -1,6 +1,6 @@
 from pipecat.services.llm_service import FunctionCallParams
 from db.queries import lookup_active_appointment
-from tools.pipecat_tools import get_pool
+from tools.pool import get_pool
 from datetime import datetime, timedelta
 
 async def lookup_appointment(params: FunctionCallParams, phone: str):
