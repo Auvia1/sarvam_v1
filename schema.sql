@@ -267,3 +267,6 @@ CREATE INDEX idx_activity_log_entity     ON activity_log(entity_type, entity_id)
 //new statement
 ALTER TABLE appointments DISABLE ROW LEVEL SECURITY;
 
+//new statement
+-- Remove the strict unique constraint so family members can share a phone number
+ALTER TABLE patients DROP CONSTRAINT IF EXISTS patients_clinic_id_phone_key;

@@ -4,6 +4,7 @@ loguru
 asyncpg
 python-dateutil
 requests
+httpx
 redis
 fastapi
 uvicorn

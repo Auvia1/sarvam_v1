@@ -1,4 +1,38 @@
 from loguru import logger
+
+
+async def get_or_create_patient(conn, clinic_id: str, patient_name: str, phone: str) -> str:
+    """
+    Finds an existing patient by phone and exact name.
+    If the name is different (e.g., a family member), it safely creates a new profile.
+    """
+    from loguru import logger
+    
+    clean_name = patient_name.strip()
+    clean_phone = phone.strip()
+    
+    # 1. Check if this exact person already exists
+    find_query = """
+        SELECT id FROM patients 
+        WHERE clinic_id = $1 AND phone = $2 AND LOWER(name) = LOWER($3)
+    """
+    row = await conn.fetchrow(find_query, clinic_id, clean_phone, clean_name)
+    
+    if row:
+        logger.info(f"👤 Found existing patient: {clean_name} ({clean_phone})")
+        return str(row['id'])
+        
+    # 2. Not found! Create a new patient profile (even if the phone exists for someone else)
+    insert_query = """
+        INSERT INTO patients (clinic_id, name, phone) 
+        VALUES ($1, $2, $3) 
+        RETURNING id
+    """
+    new_id = await conn.fetchval(insert_query, clinic_id, clean_name, clean_phone)
+    
+    logger.info(f"🆕 Created NEW patient profile: {clean_name} ({clean_phone})")
+    return str(new_id)
+
 async def get_clinic_id(pool):
     # Hardcoded for demo, but normally fetched via API key/tenant ID
     return await pool.fetchval("SELECT id FROM clinics WHERE name = 'Mithra Hospital' LIMIT 1")
@@ -67,7 +101,7 @@ async def get_doctor_booked_slots(pool, doctor_id: str, date_obj):
         print(f"Error fetching booked slots: {e}")
         return []
 
-async def book_new_appointment(pool, clinic_id, doctor_id, patient_name, phone, start_time, end_time, force_book=False):
+async def book_new_appointment(pool, clinic_id, doctor_id, patient_name, phone, start_time, end_time, force_book=False, patient_id=None):
     """Handle 15-min cleanup, Patient creation/lookup, and Appointment booking with Safe UPSERT."""
     async with pool.acquire() as conn:
         # 1. Clean up old unpaid appointments by marking them as cancelled (Soft Delete)
@@ -78,14 +112,8 @@ async def book_new_appointment(pool, clinic_id, doctor_id, patient_name, phone, 
         """
         await conn.execute(cleanup_query)
 
-        # 2. Get or Create the Patient
-        patient_query = """
-            INSERT INTO patients (clinic_id, name, phone)
-            VALUES ($1, $2, $3)
-            ON CONFLICT (clinic_id, phone) DO UPDATE SET name = EXCLUDED.name
-            RETURNING id
-        """
-        patient_id = await conn.fetchval(patient_query, clinic_id, patient_name, phone)
+        # 2. Get or Create the Patient (exact-name aware)
+        resolved_patient_id = patient_id or await get_or_create_patient(conn, clinic_id, patient_name, phone)
 
         # 3. OVERALL PATIENT APPOINTMENT CHECK (Blocks booking unless force_book is True)
         if not force_book:
@@ -104,7 +132,7 @@ async def book_new_appointment(pool, clinic_id, doctor_id, patient_name, phone, 
                 ORDER BY a.created_at DESC
                 LIMIT 1
             """
-            existing = await conn.fetchrow(check_existing, patient_id)
+            existing = await conn.fetchrow(check_existing, resolved_patient_id)
             if existing:
                 # Now returns the ID, Time, Status, Doc Name, and Doc Specialty!
                 return f"HAS_OTHER_APPOINTMENT|{existing['id']}|{existing['time_str']}|{existing['status']}|{existing['doctor_name']}|{existing['doctor_speciality']}"
@@ -121,7 +149,7 @@ async def book_new_appointment(pool, clinic_id, doctor_id, patient_name, phone, 
         existing_patient = await conn.fetchval(check_query, doctor_id, start_time)
 
         if existing_patient:
-            if str(existing_patient) == str(patient_id):
+            if str(existing_patient) == str(resolved_patient_id):
                 return "ALREADY_BOOKED_BY_USER"
             else:
                 return "SLOT_TAKEN"
@@ -138,6 +166,6 @@ async def book_new_appointment(pool, clinic_id, doctor_id, patient_name, phone, 
                 created_at = NOW()
             RETURNING id
         """
-        appt_id = await conn.fetchval(insert_query, clinic_id, patient_id, doctor_id, start_time, end_time)
+        appt_id = await conn.fetchval(insert_query, clinic_id, resolved_patient_id, doctor_id, start_time, end_time)
         
         return appt_id
