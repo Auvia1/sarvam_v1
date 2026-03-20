@@ -13,3 +13,4 @@ pytz
 pipecat-ai[google]
 python-multipart
 pipecat-ai-small-webrtc-prebuilt
+python-dateutil

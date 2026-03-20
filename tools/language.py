@@ -27,7 +27,7 @@
     
 #     await params.result_callback({"status": f"Language switched to {language.capitalize()}."})
 
-#bullbul v2
+#tools/language.py
 from pipecat.services.llm_service import FunctionCallParams
 from pipecat.frames.frames import TTSUpdateSettingsFrame
 from loguru import logger

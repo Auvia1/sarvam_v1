@@ -1,3 +1,4 @@
+#tools/pool.py
 """Singleton DB pool shared across all tool modules."""
 _pool = None
 
