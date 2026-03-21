@@ -29,15 +29,14 @@
 
 #tools/language.py
 from pipecat.services.llm_service import FunctionCallParams
-from pipecat.frames.frames import TTSUpdateSettingsFrame
+from pipecat.frames.frames import TTSUpdateSettingsFrame, EndTaskFrame
+from pipecat.processors.frame_processor import FrameDirection
 from loguru import logger
-from pipecat.frames.frames import CancelFrame
 
 async def switch_language(params: FunctionCallParams, language: str):
     """Switch the spoken language of the bot."""
     lang_lower = language.lower()
     
-    # Map to Sarvam language codes
     if lang_lower == "telugu":
         lang_code = "te-IN"
     elif lang_lower == "hindi":
@@ -47,17 +46,15 @@ async def switch_language(params: FunctionCallParams, language: str):
         
     logger.info(f"🗣️ Switching language to {language} | Voice: anushka")
     
-    # Update Sarvam TTS settings mid-call
     await params.llm.push_frame(
         TTSUpdateSettingsFrame(settings={"language": lang_code, "voice": "anushka"})
     )
-    
     await params.result_callback({"status": f"Language switched to {language.capitalize()}."})
 
-
-
 async def end_call(params: FunctionCallParams):
-    """Ends the phone call and disconnects the user."""
-    logger.info("👋 LLM requested to end the call. Hanging up...")
-    await params.llm.push_frame(CancelFrame())
-    await params.result_callback({"status": "Call ended successfully."})
+    """Ends the phone call gracefully after letting the final TTS audio play."""
+    logger.info("👋 LLM requested to end the call. Queuing graceful shutdown...")
+    
+    # Push EndTaskFrame UPSTREAM. This allows all pending audio frames to play out first.
+    await params.llm.push_frame(EndTaskFrame(), FrameDirection.UPSTREAM)
+    await params.result_callback({"status": "Call ending initiated."})

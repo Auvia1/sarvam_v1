@@ -16,10 +16,28 @@ TEST_PHONE = "8309833107"   # change if needed
 
 async def main():
     print(f"Sending test WhatsApp to {TEST_PHONE} ...")
-    result = await send_confirmation(
-        TEST_PHONE,
-        "✅ Test message from Mithra Hospitals. If you see this, Meta WhatsApp is working!"
+    
+    # Dummy data simulating what the database would return
+    patient_name = "Hari Ram"
+    phone = TEST_PHONE
+    doctor_name = "Dr. Rohan Sharma"
+    reason = "Fever and cough"
+    appt_time = "March 23, 2026 at 01:00 PM"
+    
+    # The exact template from tools/notify.py -> handle_successful_payment
+    whatsapp_msg = (
+        "✅ *Booking Confirmed!*\n\n"
+        f"👤 *Name:* {patient_name}\n"
+        f"📱 *Phone:* {phone}\n"
+        f"👨‍⚕️ *Doctor:* {doctor_name}\n"
+        f"🩺 *Reason:* {reason}\n"
+        f"📅 *Time:* {appt_time}\n\n"
+        "Thank you for choosing Mithra Hospitals!"
     )
+
+    result = await send_confirmation(TEST_PHONE, whatsapp_msg)
+    
     print("Result:", "SUCCESS" if result else "FAILED")
 
-asyncio.run(main())
+if __name__ == "__main__":
+    asyncio.run(main())
