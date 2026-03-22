@@ -12,4 +12,4 @@ __pycache__/
 .venv/
 
 # Tests cache
-.pytest_cache/
+.pytest_cache/google-credentials.json
